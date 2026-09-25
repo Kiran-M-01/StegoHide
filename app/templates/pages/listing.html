@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main class="container py-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">
+            <i class="bi bi-grid me-2"></i>All Steganography Records
+        </h1>
+        <span class="badge bg-primary fs-6">{{ allData|length }} Records</span>
+    </div>
+    
+    <div class="row g-4">
+        {% for data in allData %}
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm">
+                    
+                    <!-- Images Section -->
+                    <div class="row g-0">
+                        <div class="col-6">
+                            <div class="p-2">
+                                <img src="{{ data.original_image_url }}" class="img-fluid rounded" alt="Original">
+                                <small class="text-muted d-block mt-1">Original</small>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2">
+                                <img src="{{ data.stego_image_url }}" class="img-fluid rounded" alt="Stego">
+                                <small class="text-muted d-block mt-1">Steganographic</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card-body">
+                        <!-- Email -->
+                        <div class="mb-2">
+                            <i class="bi bi-envelope text-muted me-2"></i>
+                            <small>{{ data.email }}</small>
+                        </div>
+                        
+                        <!-- Extract Hidden Message -->
+                        <div class="mb-2">
+                            <button class="btn btn-sm btn-outline-primary extract-btn" data-stego-url="{{ data.stego_image_url }}" data-record-id="{{ data.id }}">
+                                <i class="bi bi-search me-1"></i>Extract Message
+                            </button>
+                            <div class="extracted-message mt-2 d-none">
+                                <i class="bi bi-eye-slash text-muted me-2"></i>
+                                <small class="text-break fw-bold"></small>
+                            </div>
+                        </div>
+                        
+                        <!-- File Sizes -->
+                        <div class="mb-2">
+                            <i class="bi bi-file-earmark text-muted me-2"></i>
+                            <small>Original: {{ data.original_image_filename }}</small>
+                        </div>
+                        <div class="mb-3">
+                            <i class="bi bi-file-earmark-lock text-muted me-2"></i>
+                            <small>Stego: {{ data.stego_image_filename }}</small>
+                        </div>
+                        
+                        <!-- Created Time -->
+                        <div class="text-muted">
+                            <i class="bi bi-clock me-2"></i>
+                            <small>{{ data.created_at|date:"SHORT_DATE_FORMAT" }} at {{ data.created_at|time:"H:i:s" }}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% empty %}
+            <div class="text-center py-5 w-100">
+                <i class="bi bi-inbox display-1 text-muted"></i>
+                <h4 class="text-muted mt-3">No records found</h4>
+                <p class="text-muted">Start by encoding your first image</p>
+            </div>
+        {% endfor %}
+    </div>
+</main>
+
+<!-- Bootstrap's Password modal (for masked password entry) -->
+<div class="modal fade" id="passwordModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Enter password to decrypt</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="passwordForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="modalPassword" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="modalPassword" required autocomplete="current-password">
+                    </div>
+                    <input type="hidden" id="modalRecordId">
+                    <input type="hidden" id="modalStegoUrl">
+                    <div class="small text-muted">This password is only used to decrypt the selected record and is not stored.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="modalSubmitBtn">Extract</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const passwordModalEl = document.getElementById('passwordModal');
+    const passwordModal = new bootstrap.Modal(passwordModalEl);
+    const passwordForm = document.getElementById('passwordForm');
+    const modalPasswordInput = document.getElementById('modalPassword');
+
+    function getCSRFToken() {
+        const name = 'csrftoken';
+        const cookies = document.cookie.split(';');
+        for (let cookie of cookies) {
+            cookie = cookie.trim();
+            if (cookie.startsWith(name + '=')) {
+                return cookie.substring(name.length + 1);
+            }
+        }
+        return '';
+    }
+
+    document.querySelectorAll('.extract-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            passwordModalEl._initiator = this;
+            document.getElementById('modalRecordId').value = this.dataset.recordId;
+            document.getElementById('modalStegoUrl').value = this.dataset.stegoUrl;
+            modalPasswordInput.value = '';
+            passwordModal.show();
+            setTimeout(() => modalPasswordInput.focus(), 200);
+        });
+    });
+
+    passwordForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const initiator = passwordModalEl._initiator;
+        if (!initiator) return;
+
+        const recordId = document.getElementById('modalRecordId').value;
+        const stegoUrl = document.getElementById('modalStegoUrl').value;
+        const password = modalPasswordInput.value;
+        const messageDiv = initiator.parentElement.querySelector('.extracted-message');
+        const messageText = messageDiv.querySelector('small');
+
+        const originalContent = initiator.innerHTML;
+        initiator.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Extracting...';
+        initiator.disabled = true;
+        passwordModal.hide();
+
+        try {
+            const response = await fetch('{% url "admin_extract_message" %}', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCSRFToken()
+                },
+                body: JSON.stringify({ stegoImageUrl: stegoUrl, recordId: recordId, password })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.status}`);
+            }
+
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                throw new Error('Endpoint did not return JSON');
+            }
+
+            const result = await response.json();
+
+            if (result.success) {
+                messageText.textContent = `Hidden: ${result.message}`;
+                messageDiv.classList.remove('d-none');
+                initiator.innerHTML = '<i class="bi bi-check-circle me-1"></i>Extracted';
+                initiator.classList.replace('btn-outline-primary', 'btn-success');
+            } else {
+                throw new Error(result.error || 'Extraction failed');
+            }
+        } catch (error) {
+            messageText.textContent = `Error: ${error.message}`;
+            messageDiv.classList.remove('d-none');
+            initiator.innerHTML = '<i class="bi bi-x-circle me-1"></i>Failed';
+            initiator.classList.replace('btn-outline-primary', 'btn-danger');
+            initiator.disabled = false;
+        }
+    });
+});
+</script>
+{% endblock %}
